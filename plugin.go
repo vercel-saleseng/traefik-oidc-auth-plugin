@@ -2,23 +2,29 @@ package traefik_auth_plugin
 
 import (
 	"context"
+	"crypto/rsa"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jwt"
+	"github.com/golang-jwt/jwt/v5"
 )
+
+// Allowed clock skew
+const clockSkew = 5 * time.Minute
 
 // VercelAuth is the plugin struct.
 type VercelAuth struct {
 	next   http.Handler
 	name   string
 	config *Config
-	jwkSet jwk.Set
+	jwks   *JWKS
 	client *http.Client
 }
 
@@ -91,23 +97,83 @@ func (v *VercelAuth) extractToken(h http.Header) string {
 
 // validateToken validates the JWT token.
 func (v *VercelAuth) validateToken(ctx context.Context, tokenString string) error {
-	// Parse and verify the token
-	token, err := jwt.Parse([]byte(tokenString),
-		jwt.WithContext(ctx),
-		jwt.WithKeySet(v.jwkSet),
-		jwt.WithIssuer(v.config.Issuer),
-		jwt.WithAudience(v.config.Audience()),
-		jwt.WithSubject(v.config.Subject()),
-		jwt.WithValidate(true),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to verify token: %w", err)
+	if tokenString == "" {
+		return fmt.Errorf("empty token")
 	}
 
-	j, _ := json.Marshal(token)
-	fmt.Println("AAAA", string(j))
+	// Parse the token without validation first to get the header
+	claims := jwt.RegisteredClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, &claims,
+		func(token *jwt.Token) (any, error) {
+			// Get the kid from the token header
+			kid, ok := token.Header["kid"].(string)
+			if !ok {
+				return nil, errors.New("missing kid in token header")
+			}
+
+			// Find the corresponding public key in JWKS
+			publicKey, err := v.getPublicKey(kid)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get public key: %w", err)
+			}
+
+			return publicKey, nil
+		},
+		jwt.WithAudience(v.config.Audience()),
+		jwt.WithIssuer(v.config.Issuer),
+		jwt.WithSubject(v.config.Subject()),
+		jwt.WithLeeway(clockSkew),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to parse token: %w", err)
+	}
+
+	if !token.Valid {
+		return errors.New("token is not valid")
+	}
 
 	return nil
+}
+
+// getPublicKey retrieves the public key for a given kid from JWKS
+func (v *VercelAuth) getPublicKey(kid string) (*rsa.PublicKey, error) {
+	if v.jwks == nil {
+		return nil, fmt.Errorf("JWKS not loaded")
+	}
+
+	for _, key := range v.jwks.Keys {
+		if key.Kid == kid && key.Kty == "RSA" {
+			return v.jwkToRSAPublicKey(key)
+		}
+	}
+
+	return nil, fmt.Errorf("key with kid %s not found", kid)
+}
+
+// jwkToRSAPublicKey converts a JWK to an RSA public key
+func (v *VercelAuth) jwkToRSAPublicKey(jwk JWK) (*rsa.PublicKey, error) {
+	// Decode the modulus
+	nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode modulus: %w", err)
+	}
+
+	// Decode the exponent
+	eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode exponent: %w", err)
+	}
+
+	// Convert to big integers
+	n := new(big.Int).SetBytes(nBytes)
+	e := new(big.Int).SetBytes(eBytes)
+
+	return &rsa.PublicKey{
+		N: n,
+		E: int(e.Int64()),
+	}, nil
 }
 
 // refreshJWKS fetches the JWKS from the configured endpoint.
@@ -122,12 +188,13 @@ func (v *VercelAuth) refreshJWKS(ctx context.Context) error {
 		return fmt.Errorf("JWKS endpoint returned status %d", resp.StatusCode)
 	}
 
-	jwkSet, err := jwk.ParseReader(resp.Body)
+	var jwks JWKS
+	err = json.NewDecoder(resp.Body).Decode(&jwks)
 	if err != nil {
-		return fmt.Errorf("failed to parse JWKS: %w", err)
+		return fmt.Errorf("failed to decode JWKS: %w", err)
 	}
 
-	v.jwkSet = jwkSet
+	v.jwks = &jwks
 	return nil
 }
 

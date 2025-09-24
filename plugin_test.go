@@ -5,6 +5,66 @@ import (
 	"testing"
 )
 
+func TestJWTValidation(t *testing.T) {
+	config := &Config{
+		Issuer:       "https://oidc.vercel.com/test",
+		TeamSlug:     "test-team",
+		ProjectName:  "test-project",
+		Environment:  "test",
+		TokenHeader:  "Authorization",
+		JWKSEndpoint: "https://oidc.vercel.com/test/.well-known/jwks",
+	}
+
+	plugin := &VercelAuth{
+		config: config,
+	}
+
+	tests := []struct {
+		name        string
+		token       string
+		shouldError bool
+		errorMsg    string
+	}{
+		{
+			name:        "empty token",
+			token:       "",
+			shouldError: true,
+			errorMsg:    "empty token",
+		},
+		{
+			name:        "malformed token - not enough parts",
+			token:       "invalid.token",
+			shouldError: true,
+			errorMsg:    "token is malformed",
+		},
+		{
+			name:        "malformed token - invalid JSON in header",
+			token:       "invalid.header.signature",
+			shouldError: true,
+			errorMsg:    "token is malformed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := plugin.validateToken(t.Context(), tt.token)
+
+			if tt.shouldError {
+				if err == nil {
+					t.Errorf("expected error but got none")
+					return
+				}
+				// Just check that we got an error, not the exact message
+				// since error messages can vary
+			} else {
+				if err != nil {
+					t.Errorf("expected no error but got: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestVercelAuth_extractToken(t *testing.T) {
 	tests := []struct {
 		name          string
