@@ -63,7 +63,7 @@ func TestJWKSCache_GetPublicKey_CacheHit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cache := &JWKSCache{
+	cache := &jwksCache{
 		log:      slog.Default(),
 		client:   server.Client(),
 		endpoint: server.URL,
@@ -114,7 +114,7 @@ func TestJWKSCache_GetPublicKey_KeyNotFound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cache := &JWKSCache{
+	cache := &jwksCache{
 		log:      slog.Default(),
 		client:   server.Client(),
 		endpoint: server.URL,
@@ -132,7 +132,7 @@ func TestJWKSCache_GetPublicKey_KeyNotFound(t *testing.T) {
 }
 
 func TestJWKSCache_GetPublicKey_EmptyKid(t *testing.T) {
-	cache := &JWKSCache{
+	cache := &jwksCache{
 		log:      slog.Default(),
 		client:   &http.Client{},
 		endpoint: "http://example.com",
@@ -154,7 +154,7 @@ func TestJWKSCache_GetPublicKey_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cache := &JWKSCache{
+	cache := &jwksCache{
 		log:      slog.Default(),
 		client:   server.Client(),
 		endpoint: server.URL,
@@ -191,7 +191,7 @@ func TestJWKSCache_SingleInFlightRefresh(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cache := &JWKSCache{
+	cache := &jwksCache{
 		log:      slog.Default(),
 		client:   server.Client(),
 		endpoint: server.URL,
@@ -254,7 +254,7 @@ func TestJWKSCache_RefreshTooSoon(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cache := &JWKSCache{
+	cache := &jwksCache{
 		log:      slog.Default(),
 		client:   server.Client(),
 		endpoint: server.URL,
@@ -307,7 +307,7 @@ func TestJWKSCache_ConcurrentRefreshWithCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cache := &JWKSCache{
+	cache := &jwksCache{
 		log:      slog.Default(),
 		client:   server.Client(),
 		endpoint: server.URL,
@@ -377,7 +377,7 @@ func TestJWKSCache_HTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cache := &JWKSCache{
+	cache := &jwksCache{
 		log:      slog.Default(),
 		client:   server.Client(),
 		endpoint: server.URL,
@@ -397,7 +397,7 @@ func TestJWKSCache_InvalidJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cache := &JWKSCache{
+	cache := &jwksCache{
 		log:      slog.Default(),
 		client:   server.Client(),
 		endpoint: server.URL,

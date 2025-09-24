@@ -23,7 +23,7 @@ type VercelAuth struct {
 	name   string
 	log    *slog.Logger
 	config *Config
-	jwks   *JWKSCache
+	jwks   JWKSCache
 }
 
 // New creates a new VercelAuth plugin instance.
@@ -66,7 +66,7 @@ func newWithClient(ctx context.Context, next http.Handler, config *Config, name 
 	}
 
 	// Init JWKS cache
-	plugin.jwks = &JWKSCache{
+	plugin.jwks = &jwksCache{
 		client:   client,
 		log:      log,
 		endpoint: config.JWKSEndpoint,

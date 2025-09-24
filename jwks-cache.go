@@ -23,7 +23,12 @@ const (
 
 var ErrRefreshTooSoon = errors.New("last refresh was too soon")
 
-type JWKSCache struct {
+type JWKSCache interface {
+	GetPublicKey(ctx context.Context, kid string) (*rsa.PublicKey, error)
+	Refresh(ctx context.Context) error
+}
+
+type jwksCache struct {
 	log      *slog.Logger
 	client   *http.Client
 	endpoint string
@@ -36,7 +41,7 @@ type JWKSCache struct {
 	refreshCh   chan struct{}
 }
 
-func (c *JWKSCache) GetPublicKey(ctx context.Context, kid string) (*rsa.PublicKey, error) {
+func (c *jwksCache) GetPublicKey(ctx context.Context, kid string) (*rsa.PublicKey, error) {
 	if kid == "" {
 		return nil, errors.New("kid is empty")
 	}
@@ -68,7 +73,7 @@ func (c *JWKSCache) GetPublicKey(ctx context.Context, kid string) (*rsa.PublicKe
 
 // Refresh the cached data, ensuring only one operation is in flight at a time
 // Multiple callers will wait for the same Refresh to complete
-func (c *JWKSCache) Refresh(ctx context.Context) error {
+func (c *jwksCache) Refresh(ctx context.Context) error {
 	c.refreshMu.Lock()
 
 	// If a refresh is already in progress, wait for it
@@ -103,7 +108,7 @@ func (c *JWKSCache) Refresh(ctx context.Context) error {
 	return err
 }
 
-func (c *JWKSCache) doRefresh(ctx context.Context) error {
+func (c *jwksCache) doRefresh(ctx context.Context) error {
 	// If the last refresh's too recent, return
 	c.refreshMu.Lock()
 	lastRefresh := c.lastRefresh
@@ -132,7 +137,7 @@ func (c *JWKSCache) doRefresh(ctx context.Context) error {
 }
 
 // fetchJWKS fetches the JWKS from the configured endpoint
-func (c *JWKSCache) fetchJWKS(ctx context.Context) (map[string]*rsa.PublicKey, error) {
+func (c *jwksCache) fetchJWKS(ctx context.Context) (map[string]*rsa.PublicKey, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, c.endpoint, nil)
