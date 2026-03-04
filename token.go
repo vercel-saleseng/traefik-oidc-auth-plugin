@@ -138,7 +138,10 @@ func (v *VercelAuth) validateToken(ctx context.Context, tokenString string) erro
 	}
 
 	if claims.ExpiresAt != nil {
-		cacheTTL := min(claims.ExpiresAt.Sub(now), maxValidatedTokenCacheTTL)
+		cacheTTL := claims.ExpiresAt.Sub(now)
+		if cacheTTL > maxValidatedTokenCacheTTL {
+			cacheTTL = maxValidatedTokenCacheTTL
+		}
 		if cacheTTL > 0 {
 			v.tokenCacheMu.Lock()
 			v.tokenCache[tokenHash] = tokenValidationCacheEntry{
