@@ -150,7 +150,7 @@ func (c *jwksCache) fetchJWKS(ctx context.Context) (map[string]*rsa.PublicKey, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
-	defer res.Body.Close()
+	defer res.Body.Close() //nolint:errcheck
 
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("JWKS endpoint returned status %d", res.StatusCode)

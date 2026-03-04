@@ -24,6 +24,7 @@ type mockJWKSCache struct {
 	refreshed      bool
 	errorOnGet     error
 	errorOnRefresh error
+	getCalls       atomic.Int32
 }
 
 func newMockJWKSCache() *mockJWKSCache {
@@ -33,6 +34,8 @@ func newMockJWKSCache() *mockJWKSCache {
 }
 
 func (m *mockJWKSCache) GetPublicKey(ctx context.Context, kid string) (*rsa.PublicKey, error) {
+	m.getCalls.Add(1)
+
 	if m.errorOnGet != nil {
 		return nil, m.errorOnGet
 	}
@@ -54,6 +57,10 @@ func (m *mockJWKSCache) Refresh(ctx context.Context) error {
 
 func (m *mockJWKSCache) AddKey(kid string, publicKey *rsa.PublicKey) {
 	m.keys[kid] = publicKey
+}
+
+func (m *mockJWKSCache) GetCalls() int32 {
+	return m.getCalls.Load()
 }
 
 // testKeyPair holds RSA key pair for testing
@@ -94,7 +101,7 @@ func (m *mockNextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.called.Store(true)
 	m.callCount.Add(1)
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("success"))
+	_, _ = w.Write([]byte("success"))
 }
 
 func TestVercelAuth_ServeHTTP(t *testing.T) {
@@ -120,11 +127,12 @@ func TestVercelAuth_ServeHTTP(t *testing.T) {
 		nextHandler := &mockNextHandler{}
 
 		plugin := &VercelAuth{
-			next:   nextHandler,
-			name:   "test-plugin",
-			log:    slog.New(slog.DiscardHandler),
-			config: config,
-			jwks:   mockJWKS,
+			next:       nextHandler,
+			name:       "test-plugin",
+			log:        slog.New(slog.DiscardHandler),
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 		}
 
 		// Create valid token
@@ -170,11 +178,12 @@ func TestVercelAuth_ServeHTTP(t *testing.T) {
 		nextHandler := &mockNextHandler{}
 
 		plugin := &VercelAuth{
-			next:   nextHandler,
-			name:   "test-plugin",
-			log:    slog.New(slog.DiscardHandler),
-			config: config,
-			jwks:   mockJWKS,
+			next:       nextHandler,
+			name:       "test-plugin",
+			log:        slog.New(slog.DiscardHandler),
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 		}
 
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -200,11 +209,12 @@ func TestVercelAuth_ServeHTTP(t *testing.T) {
 		nextHandler := &mockNextHandler{}
 
 		plugin := &VercelAuth{
-			next:   nextHandler,
-			name:   "test-plugin",
-			log:    slog.New(slog.DiscardHandler),
-			config: config,
-			jwks:   mockJWKS,
+			next:       nextHandler,
+			name:       "test-plugin",
+			log:        slog.New(slog.DiscardHandler),
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 		}
 
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -231,11 +241,12 @@ func TestVercelAuth_ServeHTTP(t *testing.T) {
 		nextHandler := &mockNextHandler{}
 
 		plugin := &VercelAuth{
-			next:   nextHandler,
-			name:   "test-plugin",
-			log:    slog.New(slog.DiscardHandler),
-			config: config,
-			jwks:   mockJWKS,
+			next:       nextHandler,
+			name:       "test-plugin",
+			log:        slog.New(slog.DiscardHandler),
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 		}
 
 		// Create token that's slightly in the future (within clock skew tolerance)
@@ -273,11 +284,12 @@ func TestVercelAuth_ServeHTTP(t *testing.T) {
 		nextHandler := &mockNextHandler{}
 
 		plugin := &VercelAuth{
-			name:   "test-plugin",
-			log:    slog.New(slog.DiscardHandler),
-			config: config,
-			jwks:   mockJWKS,
-			next:   nextHandler,
+			name:       "test-plugin",
+			log:        slog.New(slog.DiscardHandler),
+			config:     config,
+			jwks:       mockJWKS,
+			next:       nextHandler,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 		}
 
 		now := time.Now()
@@ -346,8 +358,9 @@ func TestVercelAuth_validateToken_ExpiredToken(t *testing.T) {
 
 	t.Run("Expired token", func(t *testing.T) {
 		plugin := &VercelAuth{
-			config: config,
-			jwks:   mockJWKS,
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 		}
 
 		// Create expired token
@@ -377,8 +390,9 @@ func TestVercelAuth_validateToken_ExpiredToken(t *testing.T) {
 
 	t.Run("Wrong issuer", func(t *testing.T) {
 		plugin := &VercelAuth{
-			config: config,
-			jwks:   mockJWKS,
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 		}
 
 		now := time.Now()
@@ -403,8 +417,9 @@ func TestVercelAuth_validateToken_ExpiredToken(t *testing.T) {
 
 	t.Run("Wrong audience", func(t *testing.T) {
 		plugin := &VercelAuth{
-			config: config,
-			jwks:   mockJWKS,
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 		}
 
 		now := time.Now()
@@ -429,8 +444,9 @@ func TestVercelAuth_validateToken_ExpiredToken(t *testing.T) {
 
 	t.Run("Wrong subject", func(t *testing.T) {
 		plugin := &VercelAuth{
-			config: config,
-			jwks:   mockJWKS,
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 		}
 
 		now := time.Now()
@@ -455,8 +471,9 @@ func TestVercelAuth_validateToken_ExpiredToken(t *testing.T) {
 
 	t.Run("Missing key id", func(t *testing.T) {
 		plugin := &VercelAuth{
-			config: config,
-			jwks:   mockJWKS,
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 		}
 
 		now := time.Now()
@@ -487,7 +504,8 @@ func TestVercelAuth_validateToken_ExpiredToken(t *testing.T) {
 
 	t.Run("Key not found", func(t *testing.T) {
 		plugin := &VercelAuth{
-			config: config,
+			config:     config,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 			// Use a new mock JWKSCache without the key
 			jwks: newMockJWKSCache(),
 		}
@@ -522,8 +540,9 @@ func TestVercelAuth_validateToken_ExpiredToken(t *testing.T) {
 		mockJWKS.errorOnGet = errors.New("JWKS cache error")
 
 		plugin := &VercelAuth{
-			config: config,
-			jwks:   mockJWKS,
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
 		}
 
 		now := time.Now()
@@ -549,6 +568,293 @@ func TestVercelAuth_validateToken_ExpiredToken(t *testing.T) {
 			t.Errorf("Expected error to contain 'failed to get public key', got: %v", err)
 		}
 	})
+}
+
+func TestVercelAuth_validateToken_Cache(t *testing.T) {
+	keyPair, err := generateTestKeyPair("test-kid")
+	if err != nil {
+		t.Fatalf("Failed to generate test key pair: %v", err)
+	}
+
+	config := &Config{
+		Issuer:      "https://oidc.vercel.com/test-team",
+		TeamSlug:    "test-team",
+		ProjectName: "test-project",
+		Environment: "production",
+	}
+
+	newToken := func(ttl time.Duration) string {
+		t.Helper()
+
+		now := time.Now()
+		claims := jwt.RegisteredClaims{
+			Issuer:    config.Issuer,
+			Subject:   config.Subject(),
+			Audience:  []string{config.Audience()},
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+			IssuedAt:  jwt.NewNumericDate(now),
+		}
+
+		tokenString, err := keyPair.generateToken(claims)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		return tokenString
+	}
+
+	t.Run("cache hit skips revalidation", func(t *testing.T) {
+		mockJWKS := newMockJWKSCache()
+		mockJWKS.AddKey(keyPair.kid, keyPair.publicKey)
+
+		plugin := &VercelAuth{
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
+		}
+
+		tokenString := newToken(time.Hour)
+
+		err := plugin.validateToken(t.Context(), tokenString)
+		if err != nil {
+			t.Fatalf("Expected first validation to succeed, got error: %v", err)
+		}
+
+		if mockJWKS.GetCalls() != 1 {
+			t.Fatalf("Expected 1 JWKS key lookup after first validation, got %d", mockJWKS.GetCalls())
+		}
+
+		mockJWKS.errorOnGet = errors.New("JWKS cache error")
+
+		err = plugin.validateToken(t.Context(), tokenString)
+		if err != nil {
+			t.Fatalf("Expected cached validation to succeed, got error: %v", err)
+		}
+
+		if mockJWKS.GetCalls() != 1 {
+			t.Fatalf("Expected cached validation to avoid JWKS lookup, got %d calls", mockJWKS.GetCalls())
+		}
+	})
+
+	t.Run("expired cache entry revalidates token", func(t *testing.T) {
+		mockJWKS := newMockJWKSCache()
+		mockJWKS.AddKey(keyPair.kid, keyPair.publicKey)
+
+		plugin := &VercelAuth{
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
+		}
+
+		tokenString := newToken(time.Hour)
+
+		err := plugin.validateToken(t.Context(), tokenString)
+		if err != nil {
+			t.Fatalf("Expected first validation to succeed, got error: %v", err)
+		}
+
+		tokenHash := validatedTokenCacheKey(tokenString)
+		plugin.tokenCacheMu.Lock()
+		plugin.tokenCache[tokenHash] = tokenValidationCacheEntry{
+			expiresAt: time.Now().Add(-time.Second),
+		}
+		plugin.tokenCacheMu.Unlock()
+
+		mockJWKS.errorOnGet = errors.New("JWKS cache error")
+
+		err = plugin.validateToken(t.Context(), tokenString)
+		if err == nil {
+			t.Fatal("Expected validation to fail after cache expiry, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to get public key") {
+			t.Fatalf("Expected public key fetch error, got: %v", err)
+		}
+		if mockJWKS.GetCalls() != 2 {
+			t.Fatalf("Expected second validation attempt after cache expiry, got %d JWKS calls", mockJWKS.GetCalls())
+		}
+	})
+
+	t.Run("cache ttl is min(token ttl, 5 minutes)", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			tokenTTL time.Duration
+			wantTTL  time.Duration
+		}{
+			{
+				name:     "long-lived token uses 5 minute cap",
+				tokenTTL: 30 * time.Minute,
+				wantTTL:  maxValidatedTokenCacheTTL,
+			},
+			{
+				name:     "short-lived token uses token ttl",
+				tokenTTL: 2 * time.Minute,
+				wantTTL:  2 * time.Minute,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				mockJWKS := newMockJWKSCache()
+				mockJWKS.AddKey(keyPair.kid, keyPair.publicKey)
+
+				plugin := &VercelAuth{
+					config:     config,
+					jwks:       mockJWKS,
+					tokenCache: make(map[string]tokenValidationCacheEntry),
+				}
+
+				tokenString := newToken(tt.tokenTTL)
+				before := time.Now()
+
+				err := plugin.validateToken(t.Context(), tokenString)
+				if err != nil {
+					t.Fatalf("Expected validation to succeed, got error: %v", err)
+				}
+
+				after := time.Now()
+				tokenHash := validatedTokenCacheKey(tokenString)
+				plugin.tokenCacheMu.RLock()
+				entry, ok := plugin.tokenCache[tokenHash]
+				plugin.tokenCacheMu.RUnlock()
+
+				if !ok {
+					t.Fatal("Expected token to be cached after successful validation")
+				}
+
+				minExpected := before.Add(tt.wantTTL).Add(-2 * time.Second)
+				maxExpected := after.Add(tt.wantTTL).Add(2 * time.Second)
+				if entry.expiresAt.Before(minExpected) || entry.expiresAt.After(maxExpected) {
+					t.Fatalf("Expected cache expiry around %v from now, got %v", tt.wantTTL, entry.expiresAt)
+				}
+			})
+		}
+	})
+
+	t.Run("invalid token is cached for max ttl", func(t *testing.T) {
+		mockJWKS := newMockJWKSCache()
+		mockJWKS.AddKey(keyPair.kid, keyPair.publicKey)
+
+		plugin := &VercelAuth{
+			config:     config,
+			jwks:       mockJWKS,
+			tokenCache: make(map[string]tokenValidationCacheEntry),
+		}
+
+		now := time.Now()
+		claims := jwt.RegisteredClaims{
+			Issuer:    config.Issuer,
+			Subject:   "wrong-subject",
+			Audience:  []string{config.Audience()},
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(now),
+		}
+
+		tokenString, err := keyPair.generateToken(claims)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		before := time.Now()
+		err = plugin.validateToken(t.Context(), tokenString)
+		if err == nil {
+			t.Fatal("Expected invalid token error, got nil")
+		}
+		after := time.Now()
+
+		tokenHash := validatedTokenCacheKey(tokenString)
+		plugin.tokenCacheMu.RLock()
+		entry, ok := plugin.tokenCache[tokenHash]
+		plugin.tokenCacheMu.RUnlock()
+
+		if !ok {
+			t.Fatal("Expected invalid token to be cached")
+		}
+		if entry.errMessage == nil {
+			t.Fatal("Expected cached invalid token entry to include an error message")
+		}
+
+		minExpected := before.Add(maxValidatedTokenCacheTTL).Add(-2 * time.Second)
+		maxExpected := after.Add(maxValidatedTokenCacheTTL).Add(2 * time.Second)
+		if entry.expiresAt.Before(minExpected) || entry.expiresAt.After(maxExpected) {
+			t.Fatalf("Expected invalid token cache expiry around %v from now, got %v", maxValidatedTokenCacheTTL, entry.expiresAt)
+		}
+
+		if mockJWKS.GetCalls() != 1 {
+			t.Fatalf("Expected 1 JWKS lookup after first invalid validation, got %d", mockJWKS.GetCalls())
+		}
+
+		mockJWKS.errorOnGet = errors.New("JWKS cache error")
+
+		err = plugin.validateToken(t.Context(), tokenString)
+		if err == nil {
+			t.Fatal("Expected cached invalid token error, got nil")
+		}
+
+		if mockJWKS.GetCalls() != 1 {
+			t.Fatalf("Expected cached invalid token to avoid new JWKS lookup, got %d calls", mockJWKS.GetCalls())
+		}
+	})
+}
+
+func TestVercelAuth_purgeExpiredValidatedTokens(t *testing.T) {
+	now := time.Now()
+	plugin := &VercelAuth{
+		tokenCache: map[string]tokenValidationCacheEntry{
+			"expired-a": {expiresAt: now.Add(-2 * time.Minute)},
+			"expired-b": {expiresAt: now},
+			"fresh":     {expiresAt: now.Add(2 * time.Minute)},
+		},
+	}
+
+	purged := plugin.purgeExpiredValidatedTokens(now)
+	if purged != 2 {
+		t.Fatalf("Expected to purge 2 entries, got %d", purged)
+	}
+
+	plugin.tokenCacheMu.RLock()
+	defer plugin.tokenCacheMu.RUnlock()
+
+	if len(plugin.tokenCache) != 1 {
+		t.Fatalf("Expected 1 entry after purge, got %d", len(plugin.tokenCache))
+	}
+	if _, ok := plugin.tokenCache["fresh"]; !ok {
+		t.Fatal("Expected fresh entry to remain in cache")
+	}
+}
+
+func TestVercelAuth_startTokenCachePurger(t *testing.T) {
+	now := time.Now()
+	plugin := &VercelAuth{
+		tokenCache: map[string]tokenValidationCacheEntry{
+			"expired": {expiresAt: now.Add(-time.Minute)},
+			"fresh":   {expiresAt: now.Add(time.Minute)},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	go plugin.startTokenCachePurger(ctx, 10*time.Millisecond)
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	purged := false
+	for time.Now().Before(deadline) {
+		plugin.tokenCacheMu.RLock()
+		_, expiredExists := plugin.tokenCache["expired"]
+		_, freshExists := plugin.tokenCache["fresh"]
+		plugin.tokenCacheMu.RUnlock()
+
+		if !expiredExists && freshExists {
+			purged = true
+			break
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !purged {
+		t.Fatal("Expected background purger to remove expired entries")
+	}
 }
 
 func TestVercelAuth_unauthorized(t *testing.T) {
@@ -605,7 +911,8 @@ func TestJWTValidation(t *testing.T) {
 	}
 
 	plugin := &VercelAuth{
-		config: config,
+		config:     config,
+		tokenCache: make(map[string]tokenValidationCacheEntry),
 	}
 
 	tests := []struct {

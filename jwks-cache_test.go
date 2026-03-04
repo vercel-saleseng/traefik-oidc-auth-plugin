@@ -32,11 +32,11 @@ func init() {
 	}
 
 	// Encode modulus as base64url
-	nBytes := testRSAKey.PublicKey.N.Bytes()
+	nBytes := testRSAKey.N.Bytes()
 	n := base64.RawURLEncoding.EncodeToString(nBytes)
 
 	// Encode exponent as base64url
-	eBytes := big.NewInt(int64(testRSAKey.PublicKey.E)).Bytes()
+	eBytes := big.NewInt(int64(testRSAKey.E)).Bytes()
 	e := base64.RawURLEncoding.EncodeToString(eBytes)
 
 	testJWK = JWK{
@@ -59,7 +59,7 @@ func TestJWKSCache_GetPublicKey_CacheHit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(jwks)
+		_ = json.NewEncoder(w).Encode(jwks)
 	}))
 	defer server.Close()
 
@@ -110,7 +110,7 @@ func TestJWKSCache_GetPublicKey_KeyNotFound(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(jwks)
+		_ = json.NewEncoder(w).Encode(jwks)
 	}))
 	defer server.Close()
 
@@ -150,7 +150,7 @@ func TestJWKSCache_GetPublicKey_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(JWKS{Keys: []JWK{}})
+		_ = json.NewEncoder(w).Encode(JWKS{Keys: []JWK{}})
 	}))
 	defer server.Close()
 
@@ -187,7 +187,7 @@ func TestJWKSCache_SingleInFlightRefresh(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(jwks)
+		_ = json.NewEncoder(w).Encode(jwks)
 	}))
 	defer server.Close()
 
@@ -250,7 +250,7 @@ func TestJWKSCache_RefreshTooSoon(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(jwks)
+		_ = json.NewEncoder(w).Encode(jwks)
 	}))
 	defer server.Close()
 
@@ -303,7 +303,7 @@ func TestJWKSCache_ConcurrentRefreshWithCancellation(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(jwks)
+		_ = json.NewEncoder(w).Encode(jwks)
 	}))
 	defer server.Close()
 
@@ -393,7 +393,7 @@ func TestJWKSCache_HTTPError(t *testing.T) {
 func TestJWKSCache_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, "invalid json")
+		_, _ = fmt.Fprint(w, "invalid json")
 	}))
 	defer server.Close()
 

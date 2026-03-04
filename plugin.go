@@ -3,19 +3,18 @@ package traefik_oidc_auth_plugin
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
+	"sync"
 	"time"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // Allowed clock skew
 const clockSkew = 5 * time.Minute
+
+const tokenCachePurgeInterval = time.Hour
 
 // VercelAuth is the plugin struct.
 type VercelAuth struct {
@@ -24,6 +23,9 @@ type VercelAuth struct {
 	log    *slog.Logger
 	config *Config
 	jwks   JWKSCache
+
+	tokenCache   map[string]tokenValidationCacheEntry
+	tokenCacheMu sync.RWMutex
 }
 
 // New creates a new VercelAuth plugin instance.
@@ -59,10 +61,11 @@ func newWithClient(ctx context.Context, next http.Handler, config *Config, name 
 	}
 
 	plugin := &VercelAuth{
-		next:   next,
-		name:   name,
-		log:    log,
-		config: config,
+		next:       next,
+		name:       name,
+		log:        log,
+		config:     config,
+		tokenCache: make(map[string]tokenValidationCacheEntry),
 	}
 
 	// Init JWKS cache
@@ -78,7 +81,27 @@ func newWithClient(ctx context.Context, next http.Handler, config *Config, name 
 		return nil, fmt.Errorf("failed to fetch JWKS from '%s': %w", config.JWKSEndpoint, err)
 	}
 
+	go plugin.startTokenCachePurger(ctx, tokenCachePurgeInterval)
+
 	return plugin, nil
+}
+
+func (v *VercelAuth) startTokenCachePurger(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = tokenCachePurgeInterval
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			v.purgeExpiredValidatedTokens(now)
+		}
+	}
 }
 
 // ServeHTTP implements the middleware logic.
@@ -97,64 +120,6 @@ func (v *VercelAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v.next.ServeHTTP(w, r)
-}
-
-// extractToken extracts the JWT token from the request.
-func (v *VercelAuth) extractToken(h http.Header) string {
-	token := h.Get(v.config.TokenHeader)
-	if token == "" {
-		return ""
-	}
-
-	// Trim the Bearer prefix (case-insensitive) if found
-	const (
-		bearerPrefix = "bearer "
-		prefixLen    = len(bearerPrefix)
-	)
-	if len(token) >= prefixLen && strings.ToLower(token[:prefixLen]) == bearerPrefix {
-		return token[prefixLen:]
-	}
-
-	return token
-}
-
-// validateToken validates the JWT token.
-func (v *VercelAuth) validateToken(ctx context.Context, tokenString string) error {
-	if tokenString == "" {
-		return fmt.Errorf("token is empty")
-	}
-
-	// Parse the token without validation first to get the header
-	token, err := jwt.Parse(tokenString,
-		func(token *jwt.Token) (any, error) {
-			// Get the kid from the token header
-			kid, ok := token.Header["kid"].(string)
-			if !ok {
-				return nil, errors.New("missing kid in token header")
-			}
-
-			// Find the corresponding public key in JWKS
-			publicKey, err := v.jwks.GetPublicKey(ctx, kid)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get public key: %w", err)
-			}
-
-			return publicKey, nil
-		},
-		jwt.WithAudience(v.config.Audience()),
-		jwt.WithIssuer(v.config.Issuer),
-		jwt.WithSubject(v.config.Subject()),
-		jwt.WithLeeway(clockSkew),
-		jwt.WithExpirationRequired(),
-		jwt.WithIssuedAt(),
-	)
-	if err != nil {
-		return err
-	} else if !token.Valid {
-		return errors.New("token is not valid")
-	}
-
-	return nil
 }
 
 // unauthorized sends an unauthorized response.
